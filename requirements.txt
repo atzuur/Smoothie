@@ -10,6 +10,3 @@ pywin32 # Useful for Windows only, comment this out if you on *nix
 tkinter # Used for file selector on Windows (would be very cool on linux too °O°?)
 vapoursynth==R54
 pyyaml # YAML config
-
-
-

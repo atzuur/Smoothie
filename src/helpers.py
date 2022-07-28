@@ -5,7 +5,7 @@ from subprocess import run, PIPE
 from re import search
 from platform import architecture, system as ossystem
 from os import environ
-from math import floor
+from glob import glob
 
 global isWT
 isWT = environ.get('WT_PROFILE_ID') != None # This environemnt variable spawns with WT
@@ -36,9 +36,9 @@ def setWTprogress(value:int,color:str=None): # Modified from https://github.com/
     value=int(value)
     print("\x1b]9;4;{};{}\x1b\\".format(color,value),end="",flush=True)
     
-def checkOS ():
+def checkOS():
     if architecture()[0] != '64bit':
-        print('This script is only compatible with 64bit systems.')
+        print('Smoothie is only compatible with 64bit systems.')
         exit(1)
 
     if ossystem() not in ['Linux', 'Windows']:
@@ -53,21 +53,12 @@ isWin = ossystem() == 'Windows'
 def pause():
     getpass('Press enter to continue..')
 
+
+def literal_path(path: str):
+    
+
+
 # Bool aliases
 yes = ['True','true','yes','y','1', True]
 no = ['False','false','no','n','0','null','',None, False]
 
-def get_sec(timecode):
-    if type(timecode) is str:
-        if '.' in timecode:
-            spare = float("0." + timecode.split('.')[1])
-            timecode = timecode.split('.')[0]
-    elif isinstance(timecode, (float, int)):
-        return timecode
-    if type(timecode) is list: timecode = timecode[0]
-    if type(timecode) is str:
-        if search('[a-zA-Z]', timecode) is not None:
-            raise Exception(f'Timecode to trim contains a letter: {timecode}')
-    if 'spare' not in locals(): spare = 0
-    # god bless https://stackoverflow.com/a/6402934
-    return sum(int(x) * 60 ** i for i, x in enumerate(reversed(str(timecode).split(':')))) + spare

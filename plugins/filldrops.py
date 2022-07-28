@@ -7,11 +7,11 @@ def FillDrops(clip, thresh=0.1):
 
     differences = core.std.PlaneStats(clip, clip[0] + clip)
 
-    super = core.mv.Super(clip)
-    forward_vectors = core.mv.Analyse(super, isb=False)
-    backwards_vectors = core.mv.Analyse(super, isb=True)
-    filldrops = core.mv.FlowInter(clip, super, mvbw=backwards_vectors, mvfw=forward_vectors, ml=1)
-    
+    mv_super = core.mv.Super(clip)
+    forward_vectors = core.mv.Analyse(mv_super, isb=False)
+    backwards_vectors = core.mv.Analyse(mv_super, isb=True)
+    filldrops = core.mv.FlowInter(clip, mv_super, mvbw=backwards_vectors, mvfw=forward_vectors, ml=1)
+
     def selectFunc(n, f):
         if f.props['PlaneStatsDiff'] < thresh:
             return filldrops

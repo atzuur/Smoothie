@@ -1,19 +1,11 @@
-from sys import argv, exit
+from sys import argv
 from os import path, system, listdir, get_terminal_size, environ
-from gui.main import main as gui_main
 from helpers import *
-from bar import * # Progress bar
 from glob import glob as resolve
 from random import choice # Randomize smoothie's flavor
 from subprocess import run, Popen
 from yaml import safe_load
 
-if isWin:
-    import tkinter as tk
-    from tkinter import filedialog # Pick a file
-    from win32gui import GetForegroundWindow, SetWindowPos # Move terminal to top left
-    from win32con import HWND_TOPMOST # Make window stay on top
-    hwnd = GetForegroundWindow()
 
 def voidargs(args):
     if args.dir:
@@ -29,7 +21,7 @@ def voidargs(args):
         recipe = path.abspath(path.join(path.dirname(argv[0]), "settings/recipe.yaml"))
         if path.exists(recipe) == False:
             print(f"Looking for recipe path {recipe}")
-            print("recipe (config) path does not exist (are you messing with files?), exitting..")
+            print("recipe (config) path does not exist (are you messing with files?), exiting..")
             pause()
             exit(1)
         if isWin:
