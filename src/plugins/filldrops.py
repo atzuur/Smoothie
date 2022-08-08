@@ -18,5 +18,4 @@ def FillDrops(clip, thresh=0.1):
         else:
             return clip
 
-    fixed = core.std.FrameEval(clip, selectFunc, prop_src=differences)
-    return fixed
+    return core.std.FrameEval(clip, selectFunc, prop_src=differences)

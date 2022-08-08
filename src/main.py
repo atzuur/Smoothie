@@ -1,14 +1,21 @@
 import sys
-from os import path, system, listdir
-from argparse import ArgumentParser
+import os
+from argparse import ArgumentParser, Namespace
+from types import TracebackType
 
 import execute
-import helpers
+from helpers import *
+from plugins.colors import printp
 
 
-def main():
+def main(args: Namespace = None): # you can pass in your own namespace of args to use smoothie as a library
 
-    helpers.checkOS()
+    def hook(t: BaseException, v: object, tb: TracebackType):
+        printp(t(v), 'exception', extra_tb=tb) # prettyprint exceptions
+
+    sys.excepthook = hook
+
+    check_os()
 
     parser = ArgumentParser()
     add_arg = parser.add_argument
@@ -22,67 +29,57 @@ def main():
     add_arg("-trim", "-t",
             help=" Trim out the parts you don't want to render, in either a timecode (hh:mm:ss) or frames (start-end)",
             nargs=1,
-            metavar="timecode=<hh>:<mm>:<ss> | frames=<start>-<end>")
+            metavar="<hh>:<mm>:<ss>-<hh>:<mm>:<ss> | <start>-<end>")
 
     add_arg("-dir",
-            help=" Opens the directory where Smoothie resides",
+            help=" Open the directory where Smoothie resides",
             action="store_true")
 
     add_arg("-recipe", "-rc",
-            help=" Opens default recipe.yaml",
+            help=" Open the default recipe.yaml",
             action="store_true")
 
     add_arg("-config", "-c",
             help=" Override config file path",
             nargs=1,
-            metavar="<PATH>")
+            metavar="<path>")
 
     add_arg("-verbose", "-v",
-            help=" increase output verbosity",
+            help=" Increase output verbosity",
             action="store_true")
 
     add_arg("-input", "-i",
             help=" Specify input video path(s)",
             nargs="+",
-            metavar="<PATH>")
+            metavar="<path>")
 
     add_arg("-output", "-o",
-            help=" Specify output video path (only works with single inputs) or output folder",
+            help=" Specify output video path (only works with single inputs) or output folder."
+                 " This can also be NULL (redirects to the OS's null device) or a dash (redirects to stdout)."
+                 " Everything else is interpreted as a path",
             nargs=1,
-            metavar="<PATH>")
+            metavar="<path>")
 
     add_arg("-override",
             help=" Override a recipe value",
             nargs="+",
             metavar="<category>;<key>=<value>")
 
-    args = parser.parse_args()
+    if not args: args = parser.parse_args()
     script_dir = sys.path[0]
 
     if args.dir:
-
-        if helpers.isWin:
-            system(f'explorer {script_dir}')
-        else:
-            print("")
-            system(f'xdg-open {script_dir}')
-
+        os.startfile(script_dir)
         exit(0)
 
     if args.recipe:
-
-        recipe = path.join(script_dir, "settings/recipe.yaml")
-
-        if not path.exists(recipe):
+        recipe = os.path.join(script_dir, "settings/recipe.yaml")
+        if not os.path.exists(recipe):
             print(f"Default recipe (config) path does not exist: {recipe}")
-            helpers.pause()
+            pause()
             exit(1)
 
-        if helpers.isWin:
-            system(recipe)
-        else:
-            system(f'xdg-open {recipe}')
-
+        os.startfile(recipe)
         exit(0)
 
     if not args.input:
@@ -91,39 +88,38 @@ def main():
 
     for idx, file in enumerate(args.input):
 
-        if helpers.isLinux:
-            args.input[idx] = path.expanduser(args.input[idx])
+        args.input[idx] = literal_path(file)
 
-        args.input[idx] = path.abspath(file)
-
-        if not path.isfile(file):
+        if not os.path.isfile(file):
             raise FileNotFoundError(f"{file} does not exist")
 
     multi_input = len(args.input) > 1
 
     if args.output:
+        args.output = args.output.strip()
 
-        if helpers.isLinux:
-            args.output = path.expanduser(args.output)
+        if args.output == "NULL":
+            args.output = os.devnull
 
-        args.output = path.abspath(args.output)
+        elif args.output == "-": ... # this is just to skip the else statement below
 
-        outf = path.dirname(args.output)
-        output_to_folder: bool = outf == args.output # if output is the same as it's dirname, then it's a folder
+        else:
+            args.output = literal_path(args.output)
 
-        if not path.exists(outf):
-            raise FileNotFoundError(f"{outf} does not exist")
+            outf = os.path.dirname(args.output) if os.path.isfile(args.output) else args.output
 
-        if multi_input and not output_to_folder:
-            args.output = outf
+            if not os.path.exists(outf):
+                raise FileNotFoundError(f'Output folder "{outf}" does not exist')
 
-        if path.isfile(args.output):
-            if input(f"{args.output} already exists, overwrite? [y/n]").casefold().strip() not in helpers.yes:
-                exit(1)
-    else:
-        args.output = None
+            if multi_input and not os.path.isdir(outf):
+                raise ValueError(f'Cannot output to a file when multiple inputs are specified')
 
     execute.main(args)
+
+
+def validate_args(args: Namespace):
+    pass
+
 
 if __name__ == "__main__":
     main()

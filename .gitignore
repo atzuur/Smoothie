@@ -1,0 +1,4 @@
+*.mp4
+*.ico
+*.pyi
+__pycache__/

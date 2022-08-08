@@ -10,7 +10,7 @@ frame blending:
   enabled: true
   output fps: 60
   intensity: 1.2
-  weighting: equal
+  weighting: gaussian | apex=2; std_dev=4; bound=(0, 2)
 
 flowblur:
   enabled: false
@@ -19,7 +19,7 @@ flowblur:
 
 encoding:
   process: ffmpeg
-  args: H264 CPU
+  args: x265 upscale
 
 timescale:
   in: 1.0

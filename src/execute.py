@@ -1,358 +1,220 @@
-from sys import argv
-from os import path, system, listdir, get_terminal_size, environ
+import random
+import subprocess as sp
+import sys
+from argparse import Namespace
+from glob import glob
+from os import get_terminal_size, path
+from pprint import pformat
+
+from constants import FRUITS
 from helpers import *
-from glob import glob as resolve
-from random import choice # Randomize smoothie's flavor
-from subprocess import run, Popen
-from yaml import safe_load
+from parse import parse_conf
+from plugins.colors import create_bar, fg, reset
 
 
-def voidargs(args):
-    if args.dir:
-        scriptDir = path.dirname(argv[0])
-        if isWin:
-            Popen(f'explorer {scriptDir}')
-            exit(0)
-        elif isLinux:
-            print(scriptDir)
-            exit(0)
+def main(args: Namespace):
 
-    if args.recipe:
-        recipe = path.abspath(path.join(path.dirname(argv[0]), "settings/recipe.yaml"))
-        if path.exists(recipe) == False:
-            print(f"Looking for recipe path {recipe}")
-            print("recipe (config) path does not exist (are you messing with files?), exiting..")
-            pause()
-            exit(1)
-        if isWin:
-            Popen(path.abspath(recipe), shell=True)
-            exit(0)
-        elif isLinux:
-            print('What code editor would you like to open your recipe with? (e.g nano, vim, code)')
-            print(f'This file is located at {recipe}')
-            editor = input('Editor:')
-            Popen(f'{path.abspath(editor)} {path.abspath(recipe)}', shell=True)
-            exit(0)
+    input_files = expand_input_files(args.input)
 
-def runvpy(parser):
-    
-    args = parser.parse_args()
+    if args.config:
+        config_filepath = args.config
+    else:
+        config_filepath = path.join(sys.path[0], '../settings/recipe.yaml')
 
-    voidargs(args)
-    
-    if args.gui:
-        gui_main()
+    if not path.exists(config_filepath):
+        raise FileNotFoundError(f'Config filepath does not exist: "{config_filepath}"')
+
+    conf = parse_conf(config_filepath)
 
     if args.override:
         for override in args.override:
-            category, key, value = override.split(';').split(';')
-            conf[category][key] = value
+            try:
+                category, pair = args.override.split(';')
+                key, value = pair.split('=')
+                conf[category][key] = value
+            except ValueError:
+                raise ValueError(f'Invalid override format: "{override}"')
 
-    if args.input in [no, None] and not args.cui:
+    if mask := conf['flowblur']['mask'] not in no:
+
+        if not path.splitext(mask)[1]:
+            mask += '.png'
+
+        default_path = path.abspath(path.join(sys.path[0], f'../masks/{mask}'))
+
+        if path.abspath(mask) == mask:
+            conf['flowblur']['mask'] = mask
+        else:
+            conf['flowblur']['mask'] = default_path
+
+        if not path.exists(conf['flowblur']['mask']):
+            raise FileNotFoundError(f'Mask filepath does not exist: "{conf["flowblur"]["mask"]}"')
+            
+
+    for video in input_files:
+
         if args.trim:
-            if 'filename' in args.trim[0]:
-                videos = loads(args.trim[0])
-        else:
-            print("Smoothie 0.7, add the -h arg for more info on the CLI\nor go to https://github.com/couleur-tweak-tips/Smoothie/wiki")
-            #parser.print_help() # If the user does not pass any args, just redirect to -h (Help)
-            exit(0)
-    elif isWin and args.input in [no, None] and args.cui:
-        root = tk.Tk()
-        none = root.withdraw()
-        root.iconbitmap(path.dirname(argv[0]) + '/src/sm.ico')
-        
-        file_path = filedialog.askopenfilenames(
-            
-            title="Select video(s) to queue to Smoothie",
-            filetypes= (("Video files", "*.mp4 *.mkv *.webm *.avi"),
-                        ("All files", "*.*"))
-        )
-        if file_path in [None,'']: exit(1)
-        if not args.input: args.input = []
-        for vid in file_path: args.input.append(vid)
-    else:
-        videos = args.input
-    
-    if args.config: config_filepath = path.abspath(args.config)
-    else: config_filepath = path.abspath(path.join(path.dirname(path.dirname(argv[0])), "settings/recipe.yaml"))
 
-    with open(config_filepath, 'r') as file:
-        conf = safe_load(file)
+            args.trim = args.trim.strip().replace(' ', '')
 
-    if args.cui and conf['misc']['stay on top'] in yes:
-        SetWindowPos(hwnd,HWND_TOPMOST,0,0,1000,60,0)
+            try:
+                fro, to = args.trim.split('-')
+            except ValueError: # if there is no '-' in the string
+                raise ValueError(f'Invalid trim format: "{args.trim}"')
 
-    if not args.input and not args.trim:
-        print("Failed to gather input videos")
-        exit(1)     
+            try:
+                fro = int(fro)
+                to = int(to)
+            except ValueError: # if not an int (frame), then it's a timecode
+                fro = timecode_to_sec(fro)
+                to = timecode_to_sec(to)
 
-        
-    mask_directory = path.abspath(path.join(path.dirname(path.dirname(argv[0])), "masks"))
-    if not path.exists(mask_directory):
-        print(f"mask folder does not exist, exitting (looked for {mask_directory})")
-        pause(); exit()
+                fps = probe(video)['fps']
+                fro = int(fro * fps)
+                to = int(to * fps)
 
+            if fro > to:
+                raise ValueError(f'Trim end cannot be before trim start: {fro=}-{to=}')
+            elif fro == to:
+                raise ValueError(f'Trim start and end cannot be the same: {fro=}-{to=}')
 
-    if not path.exists(config_filepath):
-        print(f"config path does not exist, exitting (looked for {config_filepath})")
-        pause(); exit()
-    if args.verbose:
-        print(f"VERBOSE: using config file: {config_filepath}")
-        
-        
-    EncPresets = { # Same setup as TweakList's Get-EncArgs
-        'H264': {
-            'NVENC' :       "-c:v h264_nvenc -preset p7 -rc vbr -b:v 250M -cq 18",
-            'AMF' :         "-c:v h264_amf -quality quality -qp_i 12 -qp_p 12 -qp_b 12",
-            'QuickSync' :   "-c:v h264_qsv -preset veryslow -global_quality:v 15",
-            'CPU' :         "-c:v libx264 -preset slower -x264-params aq-mode=3 -crf 15 -pix_fmt yuv420p10le"
-        },
-        'H265' : {
-            'NVENC' :       "-c:v hevc_nvenc -preset p7 -rc vbr -b:v 250M -cq 18",
-            'AMF' :         "-c:v hevc_amf -quality quality -qp_i 16 -qp_p 18 -qp_b 20",
-            'QuickSync' :   "-c:v hevc_qsv -preset veryslow -global_quality:v 18",
-            'CPU' :         "-c:v libx265 -preset slow -x265-params aq-mode=3 -crf 18 -pix_fmt yuv420p10le"
-        }
-    }
-    passedArgs = conf['encoding']['args'].split(' ') # Make an array that contains what the user passed
+            conf['trim'] = {'start': fro, 'end': to}
 
-    enc, std = False, False
-    for arg in passedArgs: # No maidens nor cases
-        if arg in ['NV','NVENC','NVIDIA']: enc = 'NVENC'
-        if arg in ['AMD','AMF']:           enc = 'AMF'
-        if arg in ['Intel','QuickSync','QSV']:   enc = 'QuickSync'
-        if arg == 'CPU':                   enc = 'CPU'
-        if arg == 'x264':                  enc = 'CPU'; std = 'H264'
-        if arg == 'x265':                  enc = 'CPU'; std = 'H265'
-        if arg in ['H264','H.264','AVC']:  std = 'H264'
-        if arg in ['HEVC','H.265','HEVC']: std = 'H265'
+        out_name = get_output_file(video, conf)
 
-    if enc and std:
-        conf['encoding']['args'] = EncPresets[std][enc] # This makes use of the EncPresets dictionary declared above
-        if 'Upscale' in passedArgs or '4K' in passedArgs: conf['encoding']['args'] += ' -vf zscale=3840:2160:f=point'
-    
-    for i in videos: # This loop ONLY converts all paths to literal, the actual for loop that does all the process is later down
-        i =- 1
-        video = videos[i]
-        if type(video) is not str: video = video['filename']
-        if '*' in video: # If filepath contains wildcard, resolve them
-            for file in resolve(video):
-                if path.isfile(file):
-                    args.input.append(file)
-            continue
-        elif not path.exists(video):
-            print(f"Filepath {video} does not exist, skipping..")
-            args.input.remove(video)
-            continue
-
-        elif path.isdir(video):
-            for file in listdir(video):
-                file = path.join(video, file)
-                if path.isfile(file):
-                    args.input.append(file)
-            continue
-        
-    if not args.input and not args.trim:
-        print("Failed to gather input videos")
-        pause()
-        exit(1)
-    
-    # if args.trimmer:
-        
-    #     commands = []
-
-    #     for video in args.input:
-    #         if isWin: system(f'title Smoothie Trimmer - {path.basename(video)}')
-    #         print("Give a timestamp to trim from your clips from/to, you can specify multiple parts, example:")
-    #         print("23 to 1:34, 1:50 to 2:04, 3:47 to 1:04:01")
-    #         config_dir = path.join(path.dirname(argv[0]),'mpv')
-    #         proc = Popen(f'mpv --config-dir="{config_dir}" --really-quiet -vf fps=120 "{path.abspath(video)}"')
-            
-    #         trims = str(input('Timecode(s): ').strip().replace('to', ';').replace(' ','').split(','))
-            
-    #         while 'to' not in trims and ';' not in trims:
-    #             print("Please give time codes separated by ; or ' to '")
-    #             trims = input('Timecode(s): ').strip().replace('to', ';').replace(' ','').split(',')[0]
-            
-    #         for trim in trims:
-    #             start, end = trim.split(';')
-    #             commands += [f'sm -i "{video}" -frametrim {get_sec(start)},{get_sec(end)}']
-    #         proc.kill()
-            
-    #     for cmd in commands:
-    #         print(cmd)
-    #         returncode = run(cmd).returncode
-    #         if returncode != 0:
-    #             raise Exception(f'Failed to trim video with command {cmd}')
-
-    #     exit(0)
-    
-    conf['TEMP'] = {}
-
-    iterations = 0
-    for i in range(len(videos)): # Second loop, now that videos have been expanded
-        #i =- 1
-        video = videos[i]
-        if type(video) is dict: 
-            trims = video
-            video = video['filename']
-        else:
-            trims = {}
-
-        video = path.expandvars(
-            path.abspath(video)
-        )
-        
-        if isWin:
-            iterations += 1
-            title = "Smoothie - " + path.basename(video)
-            if len(videos) > 1:
-                title = f'[{iterations}/{len(videos)}] ' + title
-            system(f"title {title}")
-        
-        if conf['misc']['suffix'] == 'fruits':
-            suffix = choice([
-            'Berry','Cherry','Cranberry','Coconut','Kiwi','Avocado','Durian','Lemon','Lime','Fig','Mirabelle',
-            'Peach','Apricot','Grape','Melon','Papaya','Banana','Apple','Pear','Orange','Mango','Plum','Pitaya'
-        ])
-        elif conf['misc']['suffix'] == 'detailed':
-            suffix = ''
-            if conf['interpolation']['enabled']:
-                suffix += f"{conf['interpolation']['fps']}fps"
-            if conf['frame blending']['enabled']:
-                suffix += f" ({conf['frame blending']['fps']}, {float(conf['frame blending']['intensity'])}"
-            if conf['flowblur']['enabled']:
-                suffix += f", bf@{conf['flowblur']['amount']}"
-            if "(" in suffix: suffix += ")"
-            suffix += ' '
-            
-
-        if args.outdir:
-            if args.outdir == '': # User simply specified the argument, but didn't give a value, so it defaults to current working directory
-                outdir = path.abspath(path.curdir)
-            else: # Else if speccified use what the user provided
-                outdir = path.abspath(args.outdir)
-        elif conf['misc']['folder'] in no: # If no specified output directory in config, use also the input directory as output 
-            outdir = path.abspath(path.dirname(video))
-        else: # Else finally use conf
-            outdir = conf['misc']['folder']
-            
-        if args.peek:
-            ext = '.png'
-        elif conf['misc']['container'] in no:
-            ext = path.splitext(video)[1]
-        else:
-            cont = conf['misc']['container']
-            ext = cont if cont.startswith('.') else f'.{cont}'
-        
-        filename = path.splitext(path.basename(video))[0]
-        if conf['misc']['prefix']:
-            filename = f'{conf["misc"]["prefix"]}{filename}'
-
-        if args.output and len(videos) == 1:
-            out = args.output
-        elif not args.output:
-            out = path.join(outdir, f'{filename} ~ {suffix}{ext}')
-
-            count=2
-            while path.exists(out):
-                out = path.join(outdir, f'{filename} ~ {suffix}({count}){ext}')
-                count+=1
-                               
-        if isWin:
-            vspipe = path.join(path.dirname(path.dirname(path.dirname(argv[0]))),'VapourSynth','VSPipe.exe')
-        elif isLinux:
-            vspipe = 'vspipe'
-                    
-        if args.vpy:
-            if path.dirname(args.vpy[0]) in no:
-                vpy = path.join( path.dirname(argv[0]), (args.vpy[0]) )
+        if args.output:
+            if len(input_files) > 1:
+                output_file = path.join(args.output, out_name)
             else:
-                vpy = path.abspath(args.vpy[0])
-        else: vpy = path.abspath(path.join(path.dirname(argv[0]),'vitamix.vpy'))
+                output_file = args.output
+        else:
+            output_file = path.join(path.dirname(video), out_name)
+            if args.peek: output_file = path.splitext(output_file)[0] + '.png'
 
-        if args.verbose:
-            conf['misc']['verbose'] = True
+        if path.exists(output_file):
+            print(f'Skipping {video} (already exists)')
+            continue
 
-        command = [ # This is the master command, it gets appended some extra output args later down
-        f'"{vspipe}" "{vpy}" --arg input_video="{path.abspath(video)}" --arg mask_directory="{mask_directory}" -y - ',
-        f'{conf["encoding"]["process"]} -hide_banner -loglevel error -stats -stats_period 0.15 -i - ',
-        ]
-        
-        map = '-map 0:v -map 1:a?' if isWin else '-map 0:v -map 1:a\?' # This puts the audio's file on the audio-less output file, Linux needs an escape character
-        
+        vpy = path.abspath(path.join(sys.path[0], 'vitamix.vpy'))
+        if not path.exists(vpy):
+            raise FileNotFoundError(f'Vpy script could not be found: "{vpy}"')
+
+        vs_cmd = ['vspipe',
+                  vpy,
+                  '-a', f'input_file="{video}"',
+                  '-a', f'config_file="{conf}"']
+
+        ff_cmd = ['ffmpeg',
+                  '-hide_banner',
+                  '-v', 'error',
+                  '-progress', '-', # easier to parse progress info
+                  '-stats_period', '0.05',
+                  '-i', '-']
+
         if args.peek:
-            frame = int(args.peek[0]) # Extracting the frame passed from the singular array
-            command[0] += f'--arg config="{conf}" --start {frame} --end {frame}'
-            command[1] += f' "{out}"' # No need to specify audio map, simple image output
-        elif args.tonull:
-            command[0] += f'--arg config="{conf}"'
-            command[1] += f' -f null NUL'
-        elif args.tompv:
-            a = conf['misc']['mpv bin']
-            conf['misc']['verbose'] = True
-            command[0] += f' --arg config="{conf}"'
-            command[1] = conf['misc']['mpv bin'] + ' -'
-        
-        elif 'start' in trims.keys() and 'fin' in trims.keys(): # If they're both in here
-            s, e = trims['start'], trims['fin']        
-            if s>e:
-                print(f"Trimming point {s} to {e} on video {video} is invalid: end before start??")
-                continue
-            elif e==s:
-                print(f"Trimming point {s} to {e} on video {video} is invalid start and end are the same??")
-                continue
-            
-            conf['TEMP']['start'] = s
-            conf['TEMP']['end'] = e
-            command[0] += f' --arg config="{conf}"'
-            command[1] += f'{conf["encoding"]["args"]} "{out}"' # No audio since it's desynced and cba
-        elif 'start' in trims.keys() or 'fin' in trims.keys(): # If only one is present
-            print(trims)
-            raise Exception('Incomplete trimming timecodes (need both start and end to do da trimming')
+            vs_cmd += '--start', args.peek, '--end', args.peek
+            ff_cmd += f'"{output_file}"'
+
         else:
-            command[0] += f' --arg config="{conf}"'
+            # map the audio from the input to the output, linux needs an escape character
+            audio = ['-map', '0:v', '-map', '1:a?'] if is_win else ['-map', '0:v', '-map', '1:a\?']
 
-            # Adds as input the video to get it's audio tracks and gets encoding arguments from the config file
-            command[1] += f'-i "{path.abspath(video)}" {map} {conf["encoding"]["args"]} "{out}"'
+            ts = conf['timescale']['in'] * conf['timescale']['out']
+            if ts != 1:
+                audio += '-af', f'atempo={ts}' # sync audio
 
-        if 'ffmpeg' in command[1]:
-            # This will force the output video's color range to be Full
-            range_proc = run(f'ffprobe -v error -show_entries stream=color_range -of default=noprint_wrappers=1:nokey=1 "{video}"', stdout=PIPE, stderr=PIPE, universal_newlines=True)
-            if range_proc.stdout == 'pc\n':
-                if '-vf ' in command[1]:
-                    command[1] = command[1].replace('-vf ','-vf scale=in_range=full:out_range=limited,') # Very clever video filters appending
-                else:
-                    command[1] += ' -vf scale=in_range=full:out_range=full '
+            # these need to be added separately so that they extend properly
+            ff_cmd += '-i', f'"{video}"',
+            ff_cmd += audio
+            ff_cmd += conf["encoding"]["args"].split(' ')
+            ff_cmd.append(f'"{output_file}"')
 
-        if args.verbose:
-            for cmd in command: print(f"{cmd}\n")
-            print(f"Queuing video: {video}, vspipe is {vspipe}")
-            try: a = run((command[0] + '|' + command[1]), shell=True)
-            except KeyboardInterrupt:
-                exit()
-        else:
-            log = Bar(command, video)
-            if (log):
-                if args.cui: SetWindowPos(hwnd,HWND_TOPMOST,0,0,1000,720,0)
-                print(' '.join(command))
-                print("")
-                print(conf)
-                print(''.join(log))
-                print("VapourSynth and/or FFmpeg failed, here's a bunch of info you can share to help us debug")
-                pause();exit(1)
-        # Don't join these two if statements together, the one at the top is in the loop, while the bottom is when it's finished, notice the tab difference
-    
-    if not args.verbose:
-        if args.cui:
-            system(f"title [{iterations}/{len(videos)}] Smoothie - Finished! (EOF)")
-        elif len(videos) > 1:
-            print(f"\033[u\033[0J✅ Finished rendering {len(videos)} videos", end='\r')
-        else:
-            print(f"\033[u\033[?25h", end='\r')
+        vs_cmd += ['-'] # output to stdin
 
-    if conf['misc']['ding after'] <= len(videos):
-        ding = r"C:\Windows\Media\ding.wav" # Modify that linux users :yum:
-        ffplay = 'ffplay'
-        if path.exists(r"C:\Windows\Media\ding.wav"):
-            _ = subprocess.run(f'"{ffplay}" "{ding}" -volume 20 -autoexit -showmode 0 -loglevel quiet', shell=True)
+        run_blend_cmds(vs_cmd, ff_cmd, video)
+
+
+def expand_input_files(files: list):
+    expanded = []
+    for file in files:
+        expanded += glob(file, recursive=True)
+
+    return [literal_path(file) for file in expanded]
+
+
+def get_output_file(input_file: str, conf: dict):
+
+    if not conf['output file']['prefix']: prefix = ''
+    video_name = prefix + path.basename(input_file)
+
+    cont = conf['output file']['container']
+    if cont in no:
+        ext = '.mp4'
+    else:
+        ext = cont if cont.startswith('.') else '.' + cont
+
+    suffix = conf['output file']['suffix'].casefold()
+
+    if suffix == 'fruits':
+            suffix = random.choice(FRUITS)
+
+    elif suffix == 'detailed':
+        suffix = ''
+        if conf['interpolation']['enabled']:
+            suffix += f"{conf['interpolation']['fps']}fps"
+        if conf['frame blending']['enabled']:
+            suffix += f" - {conf['frame blending']['output fps']} @ {float(conf['frame blending']['intensity'])}"
+        if conf['flowblur']['enabled']:
+            suffix += f", fb @ {conf['flowblur']['amount']}"
+
+    else: suffix = 'Smoothie'
+
+    return f'{video_name} ~ {suffix}{ext}'
+
+
+def run_blend_cmds(vs_cmd: list, ff_cmd: list, video: str):
+
+    vs_proc = sp.Popen(vs_cmd, stdout=sp.PIPE, stderr=sp.PIPE)
+    ff_proc = sp.Popen(ff_cmd, stdin=vs_proc.stdout, stdout=sp.PIPE, stderr=sp.PIPE)
+
+    video_data = probe(video)
+
+    while (vs_proc.poll() is None and
+           ff_proc.poll() is None):
+
+        if not ff_proc.stdout: continue
+
+        for line in ff_proc.stdout:
+
+            ff_data = ff_stdout_to_dict(line)
+
+            perc = ff_data['frame'] / video_data['duration'] * video_data['fps']
+            barsize = int(get_terminal_size().columns / 2)
+
+            progress = perc * barsize
+            perc *= 100
+
+            bar = create_bar(barsize, progress=progress, arrow=('━' ,'▶'))
+
+            sep = fg.gray + '|' + fg.lwhite
+            key = lambda k: k + fg.gray + ':' + ff_data[k]
+
+            info = f'{fg.lwhite}{path.basename(video)} {sep} {key("time")} {sep} {key("speed")} {sep} {perc:.2f}{fg.gray}% {reset}'
+
+            print('\033[0K', end='') # clear the line
+            print('\033[F', end='') # move cursor up one line
+            print('\033[0K', end='') # clear the line again
+
+            print(info)
+            print(bar)
+
+    if vs_proc.poll():
+        tb = '\n'.join([line.decode('utf-8').strip('\n') for line in vs_proc.stderr.readlines()])
+        raise RuntimeError(f'\n {pformat(" ".join(vs_cmd))} \n\n VSPipe failed: \n {tb}')
+
+    elif ff_proc.poll():
+        tb = '\n'.join([line.decode('utf-8').strip('\n') for line in ff_proc.stderr.readlines()])
+        raise RuntimeError(f'\n {pformat(" ".join(ff_cmd))} \n\n FFmpeg failed: \n {tb}')
+
+    else:
+        print(f'{fg.green}Smoothie - finished blending {path.basename(video)}{reset}')

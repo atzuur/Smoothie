@@ -1,36 +1,34 @@
-from os import path
-from sys import path as envpath
-envpath.append(path.dirname(__file__))
-from helpers import *
-import vapoursynth as vs
-from vapoursynth import core
-import havsfunc
-from ast import literal_eval
+import json
 import logging
-logging.basicConfig(level=logging.INFO)
+import sys
+from os import path
+
+import vsutil
+import havsfunc as haf
+import vapoursynth as vs
+
+from helpers import *
+
+sys.path.append('.')
+from plugins import filldrops, weighting
+
+core = vs.core
+
+# --args
+config_file: str | bytes
+input_video: str | bytes
 
 try:
-    global conf
-    conf = eval(config)
-except NameError:
-    raise vs.Error("Failed to load recipe (was it declared with VSPipe?)")
-except SyntaxError:
-    raise Exception(f"Failed to parse passed the JSON recipe: \n\n{config}")
-    
-def verb(msg):
-    if conf['misc']['verbose'] == True:
-        print(logging.debug(f' {msg}'))
+    config_file: str | bytes # --arg config_file
+    conf = json.loads(config_file)
+except Exception as e:
+    raise ValueError(f'Error while loading config: {e}')
 
+def verb(msg):
+    if conf['misc']['verbose'] in yes:
+        print(logging.info(f' {msg}'))
     
-if path.splitext(input_video)[1] == '.avi':
-    video = core.avisource.AVISource(input_video)
-    video = core.fmtc.matrix(clip=video, mat="709", col_fam=vs.YUV, bits=16)
-        # If you're gonna bother working with .AVI you're probably using 709 anyways
-        # (let me know of one valid case to use this container as input)
-    video = core.fmtc.resampling(clip=video, css="420")
-    video = core.fmtc.bitdepth(clip=video, bits=8)
-else:
-    video = core.ffms2.Source(source=input_video, cache=False)
+video = core.lsmas.LWLibavSource(source=input_video, cache=False)
     
 if 'start' and 'end' in conf['TEMP'].keys():
         
@@ -82,48 +80,11 @@ if str(conf['frame blending']['enabled']).lower() in yes:
         if blended_frames % 2 == 0:  # If number is not odd (requires odd number of frames)
             blended_frames += 1
     
-    if type(repartition) is str:
-        repartition = conf['frame blending']['weighting'].split(';')[0]
-        adv = conf['frame blending']['weighting'].split(';')[1:]
-        argcount = len(adv)
-    else:
-        repartition = conf['frame blending']['weighting']
-
-    args = {'frames': blended_frames}
-
-    # shout out yandere dev for the inspiration 
-    if repartition in ['gaussian','gauss','gaussiansym','gausssym','gaussian_sym']:
-        if argcount >= 1:
-            args['standard_deviation'] = int(adv[0])
-        if argcount >= 2:
-            args['bound'] = literal_eval(adv[1].strip())
-        if repartition in ['gaussian','gauss']:
-            weights = weighting.gaussian(**args)
-        else:
-            weights = weighting.gaussiansym(**args)
-    elif repartition == 'custom':
-        args['func'] = adv[0]
-        if argcount >= 2:
-            args['bound'] = literal_eval(adv[1].strip())
-        weights = weighting.custom(**args)
-    elif repartition == 'pyramid':
-        if argcount >= 1:
-            if adv[0] in yes:
-                args['reverse'] = True
-        weights = weighting.pyramid(**args)
-    elif type(repartition) is list:
-        weights = weighting.divide(frames=blended_frames, weights=repartition)
-    elif repartition[0] == '[':
-        weights = literal_eval(repartition.strip())
-    else:
-        if not hasattr(weighting, repartition):
-            raise ValueError(f'Weighting {repartition} does not exist')
-        else:
-            weights = eval(f'weighting.{repartition}(frames={blended_frames})')
+    weights: list[float]
     
     #verb(f"Weights: {weights}")
     video = core.frameblender.FrameBlend(video, weights)
-    video = havsfunc.ChangeFPS(video, int(conf['frame blending']['fps']))
+    video = haf.ChangeFPS(video, int(conf['frame blending']['fps']))
 
 if conf['flowblur']['enabled'] not in no:
     if conf['flowblur']['amount'] not in no:

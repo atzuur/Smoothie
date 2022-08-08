@@ -16,15 +16,6 @@ from numbers import Number
 from typing import Sequence
 
 
-Vector = Sequence[Number]
-"""
-Sequence of any length containing numbers
-
-Has to support:
-    `len(seq)`, `seq.__getitem__()`, `for i in seq: ...`
-"""
-
-
 def normalize(weights: list):
     """
     Normalize a list of weights to sum to 1
@@ -113,7 +104,7 @@ def pyramid(frames: int):
     return normalize(val)
 
 
-def func_eval(func: str, nums: Vector):
+def func_eval(func: str, nums: Sequence[Number]):
     """
     Run an operation on a sequence of numbers
 
@@ -156,7 +147,7 @@ def custom(frames: int, func: str = "", bound: tuple[float, float] = (0, 1)):
     return normalize(val)
 
 
-def divide(frames: int, weights: Vector):
+def divide(frames: int, weights: Sequence[Number]):
     """
     Stretch the given array (weights) to a specific length (frames)
     Example: `frames = 10; weights = [1, 2]`
