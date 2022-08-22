@@ -4,6 +4,7 @@ interpolation:
   speed: medium
   tuning: weak
   algorithm: 23
+  mask:
   gpu: true
 
 frame blending:
@@ -19,7 +20,7 @@ flowblur:
 
 encoding:
   process: ffmpeg
-  args: x265 upscale
+  args: x264
 
 timescale:
   in: 1.0
@@ -28,10 +29,9 @@ timescale:
 output file:
   folder:
   container: .mp4
-  prefix: 
+  prefix:
   suffix: detailed
 
 misc:
-  mpv bin: mpv
-  verbose: false
+  verbose: true
   dedup threshold: 0
