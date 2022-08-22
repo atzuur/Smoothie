@@ -19,3 +19,5 @@ FRUITS = 'Berry',     'Cherry',  'Cranberry',  'Coconut',     'Kiwi',      \
          'Raspberry', 'Apricot', 'Strawberry', 'Melon',       'Papaya',    \
          'Apple',     'Pear',    'Orange',     'Mango',       'Plum',      \
          'Peach',     'Grape',   'Clementine', 'Lingonberry', 'Lime'
+
+IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.webp', '.tiff', '.bmp', '.jxl', '.avif')
