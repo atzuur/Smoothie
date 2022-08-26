@@ -49,10 +49,9 @@ def parse_weights(orig: str | list) -> tuple[str, dict]:
                 if not (func_name == 'custom' and param == 'func'):
                     try:
                         value = literal_eval(value)
-                    except ValueError as V:
+                    except ValueError as v:
                         raise ValueError(f'weighting: invalid value "{value}" '
-                                         f'for parameter "{param}"') \
-                        from V
+                                         f'for parameter "{param}"') from v
 
                 params[param] = value
 

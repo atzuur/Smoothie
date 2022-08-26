@@ -1,10 +1,10 @@
+import io
 import random
 import subprocess as sp
 import sys
 from argparse import Namespace
 from glob import glob
 from os import get_terminal_size, path
-from pprint import pformat
 
 import colors
 
@@ -32,7 +32,7 @@ def main(args: Namespace):
     if args.override:
         for override in args.override:
             try:
-                category, pair = args.override.split(';')
+                category, pair = override.split(';')
                 key, value = pair.split('=')
                 conf[category][key] = value
             except ValueError:
@@ -53,6 +53,10 @@ def main(args: Namespace):
                 output_file = path.join(args.output, out_name)
             else:
                 output_file = args.output
+
+        elif fold := conf['output file']['folder']:
+            output_file = path.join(fold, out_name)
+
         else:
             output_file = path.join(path.dirname(video), out_name)
             if args.peek:
@@ -68,13 +72,13 @@ def main(args: Namespace):
 
             try:
                 fro, to = args.trim.split('-')
-            except ValueError:  # if there is no '-' in the string
+            except ValueError: # if there is no '-' in the string
                 raise ValueError(f'Invalid trim format: "{args.trim}"')
 
             try:
                 fro = int(fro)
                 to = int(to)
-            except ValueError:  # if not an int (frame), then it's a timecode
+            except ValueError: # if not an int (frame), then it's a timecode
                 fro = timecode_to_sec(fro)
                 to = timecode_to_sec(to)
 
@@ -83,18 +87,20 @@ def main(args: Namespace):
                 to = int(to * fps)
 
             if fro > to:
-                raise ValueError(
-                    f'Trim end cannot be before trim start: {fro=}-{to=}')
+                raise ValueError(f'Trim end cannot be before trim start: {fro=}-{to=}')
             elif fro == to:
-                raise ValueError(
-                    f'Trim start and end cannot be the same: {fro=}-{to=}')
+                raise ValueError(f'Trim start and end cannot be the same: {fro=}-{to=}')
 
             conf['trim'] = {'start': fro, 'end': to}
 
+
+        vpy_path, vpy_contents = script.generate(conf, video)
+        with open(vpy_path, 'w') as f:
+            f.write(vpy_contents)
+
         vs_cmd = ['vspipe',
-                  '-', # vpy is passed in via stdin
-                  '-a', f'input_video="{video}"',
-                  '-a', f'config_file="{conf}"']
+                  vpy_path,
+                  '-c', 'y4m']
 
         ff_cmd = ['ffmpeg',
                   '-hide_banner',
@@ -108,29 +114,27 @@ def main(args: Namespace):
             ff_cmd += f'"{output_file}"'
 
         else:
-            # map the audio from the input to the output, linux needs an escape character
+            # map the audio from the input to the output
             audio = ['-map', '0:v', '-map', '1:a?']
-            if is_linux:
-                audio[-1] = '1:a\?'
 
             if (ts := conf['timescale']['in'] * conf['timescale']['out']) != 1:
-                audio += '-af', f'atempo={ts}'  # sync audio
+                audio += '-af', f'atempo={ts}' # sync audio
 
             # these need to be added separately so that they extend properly
-            ff_cmd += '-i', f'"{video}"',
+            ff_cmd += '-i', video,
             ff_cmd += audio
             ff_cmd += conf['encoding']['args'].split(' ')
             ff_cmd.append(f'"{output_file}"')
 
         vs_cmd += ['-'] # output to stdin
 
-        run_blend_cmds(vs_cmd, ff_cmd, video, script.generate(conf, video))
+        run_blend_cmds(vs_cmd, ff_cmd, video)
 
 
-def run_blend_cmds(vs_cmd: list, ff_cmd: list, video: str, vpy: str):
+def run_blend_cmds(vs_cmd: list, ff_cmd: list, video: str):
 
-    vs_proc = sp.Popen(vs_cmd, stdin=vpy, # pass in vpy as stdin (does not work)
-                       stdout=sp.PIPE, stderr=sp.PIPE)
+
+    vs_proc = sp.Popen(vs_cmd, stdout=sp.PIPE, stderr=sp.PIPE)
 
     ff_proc = sp.Popen(ff_cmd, stdin=vs_proc.stdout,
                        stdout=sp.PIPE, stderr=sp.PIPE)
@@ -181,20 +185,15 @@ def run_blend_cmds(vs_cmd: list, ff_cmd: list, video: str, vpy: str):
         tb = '\n'.join([line.decode('utf-8').strip('\n')
                        for line in vs_proc.stderr.readlines()])
 
-        cmd = pformat(' '.join(vs_cmd))
-
-        raise RuntimeError(f'\n{cmd}\n\n'
-                           f'VSPipe failed:\n {tb}\n'
-                           f'Full vpy used:\n {vpy}')
+        raise RuntimeError(f'\n{" ".join(vs_cmd)}\n\n'
+                           f'VSPipe failed:\n {tb}')
 
     elif ff_proc.poll():
 
         tb = '\n'.join([line.decode('utf-8').strip('\n')
                        for line in ff_proc.stderr.readlines()])
 
-        cmd = pformat(' '.join(ff_cmd))
-
-        raise RuntimeError(f'\n{cmd}\n\n' 
+        raise RuntimeError(f'\n{" ".join(ff_cmd)}\n\n' 
                            f'FFmpeg failed:\n {tb}')
 
     else:

@@ -1,9 +1,17 @@
+import tempfile
+
 from colors import printp
 
-from helpers import no, yes, dict_to_kwarg_string
+from helpers import dict_to_kwarg_string, no, yes
 
 
-def generate(conf: dict, input_video: str) -> str:
+def generate(conf: dict, input_video: str) -> tuple[str, str]:
+    """
+    dynamically generate a vpy script from a config dict,
+    assuming that the config dict has been validated
+
+    returns the script filepath and contents
+    """
 
     def verb(msg: str):
         if conf['misc']['verbose']:
@@ -26,17 +34,19 @@ def generate(conf: dict, input_video: str) -> str:
     if conf['interpolation']['enabled'] in yes:
 
         script.extend([f'video = vsutil.depth(video, 8)', # svpflow needs 8-bit input
-                        'original = video',
-                       f'if (interp := {conf["interpolation"]["fps"]}).endswith("x"): '
-                        'interp_fps = int(video.fps * interp.replace("x", ""))',
-                       f'else: interp_fps = {conf["interpolation"]["fps"]}',
+                        'original = video'])
 
-                        'video = haf.InterFrame(video, '
-                       f'GPU={conf["interpolation"]["gpu"] in yes}, '
-                        'NewNum=interp_fps, '
-                       f'Preset="{conf["interpolation"]["speed"]}", '
-                       f'Tuning="{conf["interpolation"]["tuning"]}", '
-                       f'OverrideAlgo="{conf["interpolation"]["algorithm"]})"'])
+        if str(interp := conf['interpolation']['fps']).endswith('x'):
+             script.append(f'interp_fps = int(video.fps * {interp.replace("x", "")})')
+        else:
+            script.append(f'interp_fps = {conf["interpolation"]["fps"]}')
+
+        script.extend(['video = haf.InterFrame(video, '
+                      f'GPU={conf["interpolation"]["gpu"] in yes}, '
+                       'NewNum=interp_fps, '
+                      f'Preset="{conf["interpolation"]["speed"]}", '
+                      f'Tuning="{conf["interpolation"]["tuning"]}", '
+                      f'OverrideAlgo={conf["interpolation"]["algorithm"]})'])
 
         if (mask := conf['interpolation']['mask']) not in no:
 
@@ -61,7 +71,8 @@ def generate(conf: dict, input_video: str) -> str:
 
         script.extend([f'blended_frames = int(video.fps / '
                        f'{blnd["output fps"]} * '
-                       f'{blnd["intensity"]})'
+                       f'{blnd["intensity"]})',
+                       'blended_frames += 1 - blended_frames', # number of weights must be odd
 
                        f'weights = weighting.{blnd["weight func"]}'
                        f'(blended_frames, **{blnd["weight params"]})',
@@ -94,4 +105,4 @@ def generate(conf: dict, input_video: str) -> str:
 
     script.append('video.set_output()')
 
-    return '; '.join(script)
+    return tempfile.mkstemp(prefix='sm-', suffix='.vpy',)[1], '; '.join(script)
