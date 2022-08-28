@@ -1,6 +1,6 @@
 interpolation:
-  enabled: true
-  fps: 600
+  enabled: false
+  fps: 480
   speed: medium
   tuning: weak
   algorithm: 23

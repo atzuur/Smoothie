@@ -23,7 +23,7 @@ def generate(conf: dict, input_video: str) -> tuple[str, str]:
               'import filldrops',
               'import weighting',
               'core = vs.core',
-              f'video = core.bs.VideoSource("{input_video}")']
+             f'video = core.ffms2.Source("{input_video}")']
 
     if 'trim' in conf:
         script.append(f'video.std.Trim({conf["trim"]["start"]}, {conf["trim"]["end"]})')
@@ -61,7 +61,7 @@ def generate(conf: dict, input_video: str) -> tuple[str, str]:
         script.append(f'video.std.AssumeFPS(fpsnum=video.fps * {ts})')
 
     if (thr := conf['misc']['dedup threshold']) not in no:
-        script.append(f'video = filldrops.FillDrops(video, thresh={thr})')
+        script.append(f'video = filldrops.FillDrops(video, thresh={thr}, gpu={conf["interpolation"]["gpu"] in yes})')
 
     if (blnd := conf['frame blending'])['enabled'] in yes:
 
@@ -77,7 +77,7 @@ def generate(conf: dict, input_video: str) -> tuple[str, str]:
                        f'weights = weighting.{blnd["weight func"]}'
                        f'(blended_frames, **{blnd["weight params"]})',
 
-                       f'video.frameblender.FrameBlend(weights)',
+                       f'video.frameblender.FrameBlend(weights, planes=[0, 1, 2])',
                        f'video = haf.ChangeFPS(video, {blnd["output fps"]})'])
 
     if conf['flowblur']['enabled'] and conf['flowblur']['amount'] not in no:
@@ -105,4 +105,4 @@ def generate(conf: dict, input_video: str) -> tuple[str, str]:
 
     script.append('video.set_output()')
 
-    return tempfile.mkstemp(prefix='sm-', suffix='.vpy',)[1], '; '.join(script)
+    return tempfile.mkstemp(prefix='sm-', suffix='.vpy',)[1], '\n'.join(script)

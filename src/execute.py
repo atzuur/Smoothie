@@ -121,7 +121,7 @@ def main(args: Namespace):
                 audio += '-af', f'atempo={ts}' # sync audio
 
             # these need to be added separately so that they extend properly
-            ff_cmd += '-i', video,
+            ff_cmd += '-i', f'"{video}"',
             ff_cmd += audio
             ff_cmd += conf['encoding']['args'].split(' ')
             ff_cmd.append(f'"{output_file}"')
@@ -132,7 +132,6 @@ def main(args: Namespace):
 
 
 def run_blend_cmds(vs_cmd: list, ff_cmd: list, video: str):
-
 
     vs_proc = sp.Popen(vs_cmd, stdout=sp.PIPE, stderr=sp.PIPE)
 
@@ -180,21 +179,34 @@ def run_blend_cmds(vs_cmd: list, ff_cmd: list, video: str):
             print(info)
             print(bar)
 
-    if vs_proc.poll():
+    if vs_proc.poll() or ff_proc.poll():
 
-        tb = '\n'.join([line.decode('utf-8').strip('\n')
-                       for line in vs_proc.stderr.readlines()])
+        def parse_output(proc: sp.Popen) -> tuple[str | None, str | None]:
+            out, err = proc.stdout, proc.stderr
+            if out:
+                if isinstance(out, bytes): lines = out.readlines()
+                else: lines = out
+                out = '\n'.join(line.strip('\n') for line in lines)
 
-        raise RuntimeError(f'\n{" ".join(vs_cmd)}\n\n'
-                           f'VSPipe failed:\n {tb}')
+            if err:
+                if isinstance(err, bytes): lines = err.readlines()
+                else: lines = err
+                err = '\n'.join(line.strip('\n') for line in err.readlines())
 
-    elif ff_proc.poll():
+            return out, err
 
-        tb = '\n'.join([line.decode('utf-8').strip('\n')
-                       for line in ff_proc.stderr.readlines()])
+        vs_out, vs_err = parse_output(vs_proc)
+        ff_out, ff_err = parse_output(ff_proc)
 
-        raise RuntimeError(f'\n{" ".join(ff_cmd)}\n\n' 
-                           f'FFmpeg failed:\n {tb}')
+        raise RuntimeError(f'\nCommands:\n'
+                           f'VSPipe: `{" ".join(vs_cmd)}`\n'
+                           f'FFmpeg: `{" ".join(ff_cmd)}`\n'
+
+                           f'VSPipe stderr:\n {vs_err}\n'
+                           f'VSPipe stdout:\n {vs_out}\n'
+
+                           f'FFmpeg stderr:\n {ff_err}\n'
+                           f'FFmpeg stdout:\n {ff_out}')
 
     else:
         print(f'{colors.fg.green}'

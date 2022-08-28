@@ -13,7 +13,7 @@ from helpers import *
 def main(args: Namespace = None):
 
     def hook(t: BaseException, v: object, tb: TracebackType):
-        printp(t(v), 'exception', extra_tb=tb)  # prettyprint exceptions
+        printp(t(v), 'exception', extra_tb=tb) # prettyprint exceptions
 
     sys.excepthook = hook
 
@@ -97,8 +97,6 @@ def main(args: Namespace = None):
         if not os.path.isfile(file):
             raise FileNotFoundError(f'{file} does not exist')
 
-    multi_input = len(args.input) > 1
-
     if args.output:
         args.output = args.output.strip()
 
@@ -117,7 +115,7 @@ def main(args: Namespace = None):
             if not os.path.exists(outf):
                 raise FileNotFoundError(f'Output folder "{outf}" does not exist')
 
-            if multi_input and not os.path.isdir(outf):
+            if len(args.input) > 1 and not os.path.isdir(outf):
                 raise ValueError(f'Cannot output to a file when'
                                  ' multiple inputs are specified')
 
